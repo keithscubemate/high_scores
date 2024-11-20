@@ -1,31 +1,31 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use serde::Serialize;
+use serde::{Serialize,Deserialize};
 use serde_json::json;
 use sqlite::{self, Connection, Row};
 
-use axum::{extract::{Path, State}, routing::get, Json, Router};
+use axum::{
+    extract::{Json, Path, State},
+    routing::{get, post},
+    Router,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let db = GameDataBase::new("db.lite");
 
     db.try_create_table()?;
-    db.insert(Game { game: "snake".to_string(), player_name: "austin".to_string(), score: 10 })?;
-    db.insert(Game { game: "snake".to_string(), player_name: "alec".to_string(), score: 19 })?;
-    db.insert(Game { game: "snake".to_string(), player_name: "keith".to_string(), score: 15 })?;
-    db.insert(Game { game: "snake".to_string(), player_name: "karen".to_string(), score: 16 })?;
-    db.insert(Game { game: "breakout".to_string(), player_name: "austin".to_string(), score: 35 })?;
-    db.insert(Game { game: "breakout".to_string(), player_name: "alec".to_string(), score: 30 })?;
-    db.insert(Game { game: "breakout".to_string(), player_name: "keith".to_string(), score: 32 })?;
-    db.insert(Game { game: "breakout".to_string(), player_name: "karen".to_string(), score: 33 })?;
+
+    if false {
+        seed_table(&db)?;
+    }
 
     let db_share = Arc::new(Mutex::new(db));
 
     let app = Router::new()
-        .route("/games/", get(get_all_game))
-        .route("/games/:game_name", get(get_game_by_name))
+        .route("/games", get(get_all_game))
+        .route("/games/:game_name", get(get_game_by_name).post(put_game))
         .with_state(db_share);
 
     // run it
@@ -40,30 +40,52 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn get_all_game(
-    State(db_share): State<Arc<Mutex<GameDataBase>>>,
-) -> Json<serde_json::Value> {
+async fn get_all_game(State(db_share): State<Arc<Mutex<GameDataBase>>>) -> Json<serde_json::Value> {
     let db = db_share.lock().unwrap();
 
-    let data = db.get_all_for_game("*").unwrap();
+    let data = db.get_all_game().unwrap();
 
     Json(json!(data))
 }
 
 async fn get_game_by_name(
-    Path(id): Path<String>,
+    Path(game_name): Path<String>,
     State(db_share): State<Arc<Mutex<GameDataBase>>>,
 ) -> Json<serde_json::Value> {
     let db = db_share.lock().unwrap();
 
-    let data = db.get_all_for_game(&id).unwrap();
+    let data = db.get_all_for_game(&game_name).unwrap();
 
     Json(json!(data))
+}
+
+async fn put_game(
+    Path(game): Path<String>,
+    State(db_share): State<Arc<Mutex<GameDataBase>>>,
+    Json(details): Json<GameDetails>,
+) {
+    let db = db_share.lock().unwrap();
+
+    let GameDetails { player_name, score } = details;
+
+    let game = Game {
+        game,
+        player_name,
+        score,
+    };
+
+    db.insert(game).unwrap();
 }
 
 #[derive(Serialize)]
 struct Game {
     game: String,
+    player_name: String,
+    score: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct GameDetails {
     player_name: String,
     score: u64,
 }
@@ -126,4 +148,63 @@ impl GameDataBase {
             .map(|row| Game::from_row(&row))
             .collect())
     }
+
+    fn get_all_game(&self) -> Result<Vec<Game>> {
+        let query = "SELECT * FROM scores;";
+
+        Ok(self
+            .connection
+            .prepare(query)?
+            .into_iter()
+            .filter(|row| row.is_ok())
+            .map(|row| row.unwrap())
+            .map(|row| Game::from_row(&row))
+            .collect())
+    }
+}
+
+
+fn seed_table(db: &GameDataBase) -> Result<()> {
+    db.insert(Game {
+        game: "snake".to_string(),
+        player_name: "austin".to_string(),
+        score: 10,
+    })?;
+    db.insert(Game {
+        game: "snake".to_string(),
+        player_name: "alec".to_string(),
+        score: 19,
+    })?;
+    db.insert(Game {
+        game: "snake".to_string(),
+        player_name: "keith".to_string(),
+        score: 15,
+    })?;
+    db.insert(Game {
+        game: "snake".to_string(),
+        player_name: "karen".to_string(),
+        score: 16,
+    })?;
+    db.insert(Game {
+        game: "breakout".to_string(),
+        player_name: "austin".to_string(),
+        score: 35,
+    })?;
+    db.insert(Game {
+        game: "breakout".to_string(),
+        player_name: "alec".to_string(),
+        score: 30,
+    })?;
+    db.insert(Game {
+        game: "breakout".to_string(),
+        player_name: "keith".to_string(),
+        score: 32,
+    })?;
+    db.insert(Game {
+        game: "breakout".to_string(),
+        player_name: "karen".to_string(),
+        score: 33,
+    })?;
+
+    Ok(())
 }
